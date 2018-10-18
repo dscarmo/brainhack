@@ -1,0 +1,8 @@
+Instance 01 - Compressed Sensing
+- ec2-18-188-67-10.us-east-2.compute.amazonaws.com
+- i-0425ce840d9a12068
+
+
+Instance 02 - Compressed Sensing
+- ec2-18-188-71-241.us-east-2.compute.amazonaws.com
+- i-0495b97e808dcde95
