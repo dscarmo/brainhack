@@ -1,4 +1,5 @@
 import time
+from sys import argv
 
 from matplotlib import pyplot as plt
 import torch
@@ -118,9 +119,8 @@ class UNet(nn.Module):
         unet = UNet(n_channels, n_classes)
         return unet.forward(inpt)
     
-    def __init__(self, n_channels, n_classes, mask_ths=None):
+    def __init__(self, n_channels, n_classes):
         super(UNet, self).__init__()
-        self.mask_ths = mask_ths
         self.inc = inconv(n_channels, 64)
         self.down1 = down(64, 128)
         self.down2 = down(128, 256)
@@ -146,8 +146,8 @@ class UNet(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         x = self.outc(x)
-        if self.mask_ths is not None:
-            x = (x > self.mask_ths).long()
         return x
 
-UNet(1, 1).test()
+if len(argv) > 1:
+    if argv[1] == "predict":
+        UNet(1, 1).test()

@@ -1,5 +1,7 @@
 import os
 import glob
+import multiprocessing as mp
+from sys import argv
 
 import numpy as np
 import cv2 as cv
@@ -7,6 +9,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as data
+
+from tqdm import tqdm
 
 data_dir = os.path.join("E:", "fast_bigdata")
 
@@ -24,24 +28,9 @@ class ToTensor(object):
         input numpy image: H x W
         output torch image: C X H X W
         '''
-        image = torch.unsqueeze(torch.from_numpy(npimage), 0).float()
-        mask = torch.unsqueeze(torch.from_numpy(npmask), 0).float()
+        image = torch.unsqueeze(torch.from_numpy(npimage), 1).float()
+        mask = torch.unsqueeze(torch.from_numpy(npmask), 1).float()
         return image, mask
-
-
-class ToNumpy(object):
-    '''
-    Convert tensors in sample to ndarrays.
-    '''
-    def __call__(self, image, mask=None):
-        '''
-        input torch image: C X H X W
-        output numpy image: H x W
-        '''
-        npimage = torch.squeeze(image).numpy()
-        npmask = torch.squeeze(mask).numpy()
-        return npimage, npmask
-
 
 class ReconstructionDataset(data.Dataset):
     '''
@@ -50,32 +39,71 @@ class ReconstructionDataset(data.Dataset):
     undersample_mask = np.load("sampling_mask_25perc.npy")
     @staticmethod
     def test():
-        complex_kspace = ReconstructionDataset().getkspace(0)
-        kspace_view = logkspace(complex_kspace)
-        print(kspace_view.shape)
+        rd = ReconstructionDataset()
+        print(len(rd))
+        for i in range(len(rd)):
+            img, uimg = rd[i]
+            cv.imshow("img", img)
+            cv.imshow("uimg", uimg)
+            if cv.waitKey(16) == 27:
+                break
 
-        undersampled_kspace = undersample_kspace(complex_kspace)
-        print(undersampled_kspace.shape)
-        ukspace_view = logkspace(undersampled_kspace)
-        print(ukspace_view.shape)
-
-        visualize_orientation("k space", kspace_view, ukspace_view)
-
-        mriimage = kspace_toimg(complex_kspace)
-        undersampled_mriimage = kspace_toimg(undersampled_kspace)
-        print(mriimage.shape)
-
-        visualize_orientation("Reconstructed", mriimage, undersampled_mriimage)
-        visualize_orientation("Reconstructed", mriimage, undersampled_mriimage, dim=1)
-        visualize_orientation("Reconstructed", mriimage, undersampled_mriimage, dim=2)
-
-    def __init__(self, root=os.path.join("E:\\", "fast_bigdata", "Raw-data"), mode="Train", transform=None):
+    def self_test(self):
+        print("Testing RD in {} mode".format(self.mode))
+        for i in range(len(self)):
+            img, uimg = self.__getitem__(i)
+            if type(img) is np.ndarray:
+                cv.imshow("img", img)
+                cv.imshow("uimg", uimg)
+            else:
+                cv.imshow("img", img.squeeze().numpy())
+                cv.imshow("uimg", uimg.squeeze().numpy())
+            if cv.waitKey(1) == 27:
+                break                
+    
+    # def __init__(self, root=os.path.join("E:\\", "fast_bigdata", "Raw-data"), mode="Train", transform=None):
+    def __init__(self, root=os.path.join("/home", "diedre", "bigdata", "compressed_data", "Raw-data"), mode="train", transform=None, load=True):
         '''
         root: Root of folder with Train/Test/Val folders
         mode: use Train, Test or Val folder
         '''
+        self.mode = mode
         self.data_ids = glob.glob(os.path.join(root, mode, "*.npy"))
         self.transform = transform
+        self.volume_len = np.load(self.data_ids[0]).shape
+        
+        if load is False:
+            self.slices = np.zeros((self.volume_len[0]*len(self.data_ids), self.volume_len[1], self.volume_len[2]), dtype=np.float)
+            self.uslices = np.zeros((self.volume_len[0]*len(self.data_ids), self.volume_len[1], self.volume_len[2]), dtype=np.float)
+            
+            print("Loading {} data".format(mode))
+            i = 0
+            for filename in tqdm(self.data_ids):
+                data = np.load(filename) 
+                image = kspace_toimg(data)
+                image = view_normalize(image)
+
+                undersampled_data = undersample_kspace(data)
+                undersampled_image = kspace_toimg(undersampled_data)
+                uimage = view_normalize(undersampled_image)
+                
+                self.slices[170*i:170*i + 170, :, :] = image[0:170, :, :]
+                self.uslices[170*i:170*i + 170, :, :] = uimage[0:170, : , :]
+                i += 1
+            
+            np.save("{}slices.npy".format(mode), self.slices)
+            np.save("{}uslices.npy".format(mode), self.uslices)
+        else:
+            self.slices = np.load("{}slices.npy".format(mode))
+            self.uslices = np.load("{}uslices.npy".format(mode))
+
+        self.len = self.slices.shape[0]
+
+        if self.transform is not None:
+            self.slices, self.uslices = self.transform(self.slices, self.uslices)
+
+    def __len__(self):
+        return self.len
 
     def getkspace(self, i):
         '''
@@ -88,18 +116,7 @@ class ReconstructionDataset(data.Dataset):
         '''
         Get undersampled image and target at index i
         '''
-        data = np.load(self.data_ids[i]) 
-        image = kspace_toimg(data)
-        image = view_normalize(image)
-
-        undersampled_data = undersample_kspace(data)
-        undersampled_image = kspace_toimg(undersampled_data)
-        uimage = view_normalize(undersampled_image)
-
-        if self.transform is not None:
-            self.transform(image, uimage)
-
-        return  uimage, image 
+        return self.uslices[i], self.slices[i]
 
 
 def kspace_toimg(complex_kspace):
@@ -129,11 +146,11 @@ def undersample_kspace(kspace):
     '''
     Undersamples kspace with pre made mask
     '''
-    print("Pre undersample shape: {}".format(kspace.shape))
+    #print("Pre undersample shape: {}".format(kspace.shape))
     usampled = kspace.copy()
     usampled[:, ReconstructionDataset.undersample_mask, :] = 0
 
-    print("Post undersample shape: {}".format(usampled.shape))
+    #print("Post undersample shape: {}".format(usampled.shape))
     return usampled
 
 def visualize_orientation(winname, volume, undersampled_kspace=None, dim=0):
@@ -164,25 +181,44 @@ def visualize_orientation(winname, volume, undersampled_kspace=None, dim=0):
         if cv.waitKey(0) == 27:
             return
 
-def prepare_environment():
+def mp_datasetinit(mode, data_transforms, dict, load):
+    dict[mode] = ReconstructionDataset(mode=mode, transform=data_transforms[mode], load=load)
+
+
+def prepare_environment(load=True, debug=False, multithread=True, batch_size=10):
     '''
     Returns dataloaders, device and dataset_sizes
     '''    
-
-    data_transforms = {'train': ToTensor(), 'Validation': ToTensor(), 'test': ToTensor()}
+    print("Loading data... Please wait...")
+    data_transforms = {'train': ToTensor(), 'validation': ToTensor(), 'test': ToTensor()}
 
     modes = ['train', 'validation', 'test']
-
-    rec = {x: ReconstructionDataset(mode=x, transform=data_transforms[x]) for x in modes}
-
+    rec = None
     if WINDOWS:
+        rec = {x: ReconstructionDataset(mode=x, transform=data_transforms[x], load=load) for x in modes}
         nworkers = 0
     else:
-        nworkers = 12
+        nworkers = 0
+        if multithread:
+            m = mp.Manager()
+            rec = m.dict()
+            ps = []
+            for x in modes:
+                p = mp.Process(target=mp_datasetinit, args=(x, data_transforms, rec, load))
+                ps.append(p)
+                p.start()
+            for p in ps:
+                p.join()
+        else:
+            rec = {x: ReconstructionDataset(mode=x, transform=data_transforms[x], load=load) for x in modes}    
+
+    if debug:
+        for x in modes:
+            rec[x].self_test()
 
     print("Using " + str(nworkers) + " workers")
     
-    rec_dataloaders = {x: data.DataLoader(rec[x], batch_size=20, shuffle=True, num_workers=nworkers) for x in modes}
+    rec_dataloaders = {x: data.DataLoader(rec[x], batch_size=batch_size, shuffle=True, num_workers=nworkers) for x in modes}
 
     rec_it = iter(rec_dataloaders['test'])  # test iterator
 
@@ -195,4 +231,8 @@ def prepare_environment():
     print("Device: " + str(device))
 
     return rec_dataloaders, device, dataset_sizes
-#ReconstructionDataset().test()
+
+if len(argv) > 1:
+    if argv[1] == "test":
+        prepare_environment(load=True, debug=True, multithread=True)
+    
