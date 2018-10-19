@@ -59,10 +59,14 @@ class ReconstructionDataset(data.Dataset):
                 cv.imshow("img", img.squeeze().numpy())
                 cv.imshow("uimg", uimg.squeeze().numpy())
             if cv.waitKey(1) == 27:
-                break                
-    
-    # def __init__(self, root=os.path.join("E:\\", "fast_bigdata", "Raw-data"), mode="Train", transform=None):
-    def __init__(self, root=os.path.join("/home", "diedre", "bigdata", "compressed_data", "Raw-data"), mode="train", transform=None, load=True):
+                break
+
+    if WINDOWS:
+        default_path = os.path.join("E:\\", "fast_bigdata", "Raw-data")
+    else:
+        default_path = os.path.join("/home", "diedre", "bigdata", "compressed_data", "Raw-data")
+
+    def __init__(self, root=default_path, mode="train", transform=None, load=True):
         '''
         root: Root of folder with Train/Test/Val folders
         mode: use Train, Test or Val folder
@@ -71,7 +75,7 @@ class ReconstructionDataset(data.Dataset):
         self.data_ids = glob.glob(os.path.join(root, mode, "*.npy"))
         self.transform = transform
         self.volume_len = np.load(self.data_ids[0]).shape
-        
+
         if load is False:
             self.slices = np.zeros((self.volume_len[0]*len(self.data_ids), self.volume_len[1], self.volume_len[2]), dtype=np.float)
             self.uslices = np.zeros((self.volume_len[0]*len(self.data_ids), self.volume_len[1], self.volume_len[2]), dtype=np.float)
