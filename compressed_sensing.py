@@ -3,7 +3,7 @@ import cv2 as cv
 from train import *
 from rdataset import *
 
-model_name = "compressed_sensing_test_nolinear"
+model_name = "compressed_sensing_test_nolinear_50epochs"
 with open(str(model_name) + ".pkl", "rb") as output_file:
     results = pickle.load(output_file)
 
