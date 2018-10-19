@@ -222,7 +222,7 @@ def prepare_environment(load=True, debug=False, multithread=True, batch_size=10)
 
     print("Using " + str(nworkers) + " workers")
     
-    rec_dataloaders = {x: data.DataLoader(rec[x], batch_size=batch_size, shuffle=True, num_workers=nworkers) for x in modes}
+    rec_dataloaders = {x: data.DataLoader(rec[x], batch_size=batch_size, shuffle=x=="train", num_workers=nworkers) for x in modes}
 
     rec_it = iter(rec_dataloaders['test'])  # test iterator
 
